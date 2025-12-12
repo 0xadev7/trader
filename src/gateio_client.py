@@ -45,7 +45,9 @@ class GateIOClient:
         query_string = ""
 
         if params:
-            query_string = "&".join([f"{k}={v}" for k, v in sorted(params.items())])
+            # URL encode parameter values
+            from urllib.parse import urlencode
+            query_string = urlencode(sorted(params.items()))
 
         payload_string = ""
         if data:
@@ -76,6 +78,16 @@ class GateIOClient:
 
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.HTTPError as e:
+            error_msg = f"API request failed: {e}"
+            if hasattr(e.response, 'text'):
+                try:
+                    error_detail = e.response.json()
+                    error_msg += f" - Details: {error_detail}"
+                except:
+                    error_msg += f" - Response: {e.response.text[:200]}"
+            logger.error(error_msg)
+            raise
         except requests.exceptions.RequestException as e:
             logger.error(f"API request failed: {e}")
             raise
@@ -102,10 +114,13 @@ class GateIOClient:
         Args:
             pair: Trading pair (e.g., 'BTC_USDT')
             interval: Time interval (1m, 5m, 15m, 1h, 4h, 1d)
-            limit: Number of candles
+            limit: Number of candles (max 1000 per request)
             from_time: Start timestamp (optional)
         """
-        params = {"currency_pair": pair, "interval": interval, "limit": limit}
+        # Gate.io API v4 uses BTC_USDT format (underscore) for currency_pair
+        # Limit maximum is typically 1000 per request
+        max_limit = min(limit, 1000)
+        params = {"currency_pair": pair, "interval": interval, "limit": max_limit}
         if from_time:
             params["from"] = from_time
 
@@ -185,13 +200,56 @@ class TradingPair:
         return float(ticker.get("last", 0))
 
     def get_klines_df(self, interval: str, limit: int = 500) -> "pd.DataFrame":
-        """Get candlestick data as DataFrame."""
+        """Get candlestick data as DataFrame.
+        
+        Supports pagination for limits > 1000 by making multiple requests.
+        """
         import pandas as pd
-
-        klines = self.client.get_klines(self.symbol, interval, limit)
+        import time as time_module
+        
+        all_klines = []
+        remaining_limit = limit
+        from_time = None
+        
+        # Gate.io API max limit per request is 1000
+        max_per_request = 1000
+        
+        while remaining_limit > 0:
+            request_limit = min(remaining_limit, max_per_request)
+            try:
+                klines = self.client.get_klines(
+                    self.symbol, interval, request_limit, from_time=from_time
+                )
+                
+                if not klines:
+                    break
+                    
+                all_klines.extend(klines)
+                
+                # If we got fewer than requested, we've reached the end
+                if len(klines) < request_limit:
+                    break
+                
+                # Update from_time to get older data (klines are in reverse chronological order)
+                # The first timestamp in the response is the most recent
+                if len(klines) > 0:
+                    from_time = int(klines[-1][0]) - 1  # Use last candle's timestamp - 1
+                
+                remaining_limit -= len(klines)
+                
+                # Rate limiting - small delay between requests
+                if remaining_limit > 0:
+                    time_module.sleep(0.1)
+                    
+            except Exception as e:
+                logger.error(f"Error fetching klines batch: {e}")
+                break
+        
+        if not all_klines:
+            return pd.DataFrame()
 
         df = pd.DataFrame(
-            klines, columns=["timestamp", "volume", "close", "high", "low", "open"]
+            all_klines, columns=["timestamp", "volume", "close", "high", "low", "open"]
         )
 
         # Convert types
@@ -199,5 +257,9 @@ class TradingPair:
         for col in ["open", "high", "low", "close", "volume"]:
             df[col] = df[col].astype(float)
 
+        # Sort by timestamp (oldest first) and limit to requested amount
         df = df.sort_values("timestamp").reset_index(drop=True)
+        if len(df) > limit:
+            df = df.tail(limit).reset_index(drop=True)
+        
         return df
