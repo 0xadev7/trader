@@ -58,7 +58,7 @@ check-env:
 		echo "❌ .env file not found. Run 'make setup' first."; \
 		exit 1; \
 	fi
-	@python -c "from dotenv import load_dotenv; import os; load_dotenv(); \
+	@PYTHONPATH=. python -c "from dotenv import load_dotenv; import os; load_dotenv(); \
 		api_key = os.getenv('GATE_API_KEY', ''); \
 		api_secret = os.getenv('GATE_API_SECRET', ''); \
 		pairs = os.getenv('TRADING_PAIRS', ''); \
@@ -76,7 +76,7 @@ train: check-env
 	@echo "=========================================="
 	@echo "⚠️  This may take 10-30 minutes per trading pair..."
 	@echo ""
-	python train_models.py
+	PYTHONPATH=. python -m src.train_models
 
 # Run backtest
 backtest: check-env
@@ -84,7 +84,7 @@ backtest: check-env
 	@echo "Running Backtest"
 	@echo "=========================================="
 	@echo ""
-	python backtest.py
+	PYTHONPATH=. python -m src.backtest
 
 # Run dry-run simulation
 dry-run: check-env
@@ -94,10 +94,10 @@ dry-run: check-env
 	@echo "⚠️  This simulates trading without placing real orders"
 	@echo ""
 	@if [ -z "$(dry-run-days)" ]; then \
-		python dry_run.py 7; \
+		PYTHONPATH=. python -m src.dry_run 7; \
 	else \
 		echo "Running for $(dry-run-days) days..."; \
-		python dry_run.py $(dry-run-days); \
+		PYTHONPATH=. python -m src.dry_run $(dry-run-days); \
 	fi
 
 # Run live trading bot
@@ -116,7 +116,7 @@ run: check-env
 	echo; \
 	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
 		echo "Starting live trading bot..."; \
-		python main.py; \
+		PYTHONPATH=. python -m src.main; \
 	else \
 		echo "Cancelled."; \
 	fi
@@ -124,9 +124,9 @@ run: check-env
 # Clean temporary files
 clean:
 	@echo "Cleaning temporary files..."
-	@rm -rf __pycache__ */__pycache__ */*/__pycache__
+	@rm -rf __pycache__ */__pycache__ */*/__pycache__ src/__pycache__ src/*/__pycache__
 	@rm -rf .pytest_cache
-	@rm -rf *.pyc */*.pyc */*/*.pyc
+	@rm -rf *.pyc */*.pyc */*/*.pyc src/*.pyc
 	@rm -rf .mypy_cache
 	@rm -rf *.egg-info
 	@find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
@@ -146,7 +146,7 @@ status: check-env
 	@echo "=========================================="
 	@echo "Bot Status and Configuration"
 	@echo "=========================================="
-	@python -c "from config import Config; \
+	@PYTHONPATH=. python -c "from src.config import Config; \
 		print('Trading Pairs:', ', '.join(Config.TRADING_PAIRS)); \
 		print('Initial Capital:', f'\$${Config.INITIAL_CAPITAL:,.2f}'); \
 		print('Risk Per Trade:', f'{Config.RISK_PER_TRADE*100:.1f}%'); \
@@ -164,10 +164,10 @@ status: check-env
 # Basic functionality test
 test:
 	@echo "Running basic functionality tests..."
-	@python -c "from config import Config; print('✅ Config loaded'); \
-		from gateio_client import GateIOClient; print('✅ GateIO client imported'); \
-		from data_pipeline import DataPipeline; print('✅ Data pipeline imported'); \
-		from models import LSTMModel, TransformerModel; print('✅ Models imported'); \
+	@PYTHONPATH=. python -c "from src.config import Config; print('✅ Config loaded'); \
+		from src.gateio_client import GateIOClient; print('✅ GateIO client imported'); \
+		from src.data_pipeline import DataPipeline; print('✅ Data pipeline imported'); \
+		from src.lstm_model import LSTMModel; from src.transformer_model import TransformerModel; print('✅ Models imported'); \
 		print('✅ All imports successful');"
 
 # Development shortcuts
@@ -182,18 +182,17 @@ dev-setup: install setup
 # Quick backtest for one pair
 backtest-quick: check-env
 	@echo "Running quick backtest..."
-	@python -c "import sys; sys.path.insert(0, '.'); \
-		from config import Config; \
+	@PYTHONPATH=. python -c "from src.config import Config; \
 		Config.TRADING_PAIRS = [Config.TRADING_PAIRS[0]]; \
-		from backtest import train_models_and_backtest; \
-		from gateio_client import GateIOClient; \
+		from src.backtest import train_models_and_backtest; \
+		from src.gateio_client import GateIOClient; \
 		client = GateIOClient(Config.GATE_API_KEY, Config.GATE_API_SECRET); \
 		train_models_and_backtest(client, Config.TRADING_PAIRS[0]);"
 
 # Show configuration values
 show-config:
 	@echo "Current Configuration:"
-	@python -c "from config import Config; \
+	@PYTHONPATH=. python -c "from src.config import Config; \
 		import inspect; \
 		members = inspect.getmembers(Config, lambda x: not inspect.isroutine(x)); \
 		attrs = [m for m in members if not m[0].startswith('_') and not callable(m[1])]; \
