@@ -1,4 +1,9 @@
 """Script to train all models for the trading bot."""
+import sys
+import os
+# Add project root to Python path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from loguru import logger
 from config import Config
 from gateio_client import GateIOClient
