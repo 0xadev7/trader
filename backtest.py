@@ -1,21 +1,16 @@
 """Backtesting framework for strategy validation."""
-import sys
-import os
-# Add project root to Python path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional
-from datetime import datetime, timedelta
+from typing import Dict, List
 from loguru import logger
-from config import Config
-from data_pipeline import DataPipeline
-from models import LSTMModel, TransformerModel
-from rl_agent import PPOAgent, TradingEnv
-from ensemble_strategy import EnsembleStrategy
-from risk_manager import RiskManager
-from gateio_client import GateIOClient
+
+from .config import Config
+from .lstm_model import LSTMModel
+from .transformer_model import TransformerModel
+from .ensemble_strategy import EnsembleStrategy
+from .risk_manager import RiskManager
+from .gateio_client import GateIOClient
 
 
 class Backtester:

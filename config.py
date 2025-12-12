@@ -1,7 +1,6 @@
 """Configuration settings for the trading bot."""
 import os
 from dotenv import load_dotenv
-from typing import List
 
 load_dotenv()
 
