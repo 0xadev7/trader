@@ -158,14 +158,16 @@ class EnsembleStrategy:
             signal_weights[signal] += weight
 
         # Determine final signal
+        # Lower threshold from 0.4 to 0.25 to generate more trades
+        signal_threshold = 0.25
         if (
             signal_weights["buy"] > signal_weights["sell"]
-            and signal_weights["buy"] > 0.4
+            and signal_weights["buy"] > signal_threshold
         ):
             final_signal = "buy"
         elif (
             signal_weights["sell"] > signal_weights["buy"]
-            and signal_weights["sell"] > 0.4
+            and signal_weights["sell"] > signal_threshold
         ):
             final_signal = "sell"
         else:

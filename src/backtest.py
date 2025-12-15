@@ -136,20 +136,26 @@ class Backtester:
                 if sl_tp:
                     # Close position
                     close_result = risk_manager.close_position(pair, current_price)
+                    # Apply commission to P&L
+                    trade_value = position['size'] * current_price
+                    commission_cost = trade_value * self.commission
+                    net_pnl = close_result['pnl'] - commission_cost
                     trades.append({
                         'entry_time': current_data.iloc[-1]['timestamp'],
                         'exit_time': current_data.iloc[-1]['timestamp'],
                         'entry_price': entry_price,
                         'exit_price': current_price,
                         'side': position['side'],
-                        'pnl': close_result['pnl'],
+                        'pnl': net_pnl,  # Net P&L after commission
                         'pnl_pct': close_result['pnl_pct'],
+                        'commission': commission_cost,
                         'exit_reason': sl_tp
                     })
                     current_position = None
             
             # Execute new trades based on signal
-            if signal in ['buy', 'sell'] and confidence > 0.6:
+            # Lower confidence threshold to generate more trades (was 0.6)
+            if signal in ['buy', 'sell'] and confidence > 0.4:
                 # Validate trade
                 validation = risk_manager.validate_trade(
                     pair, signal, 
@@ -163,26 +169,37 @@ class Backtester:
                         position = risk_manager.positions[pair]
                         if position['side'] != signal:
                             close_result = risk_manager.close_position(pair, current_price)
+                            # Apply commission
+                            trade_value = position['size'] * current_price
+                            commission_cost = trade_value * self.commission
+                            net_pnl = close_result['pnl'] - commission_cost
                             trades.append({
                                 'entry_time': current_data.iloc[-2]['timestamp'],
                                 'exit_time': current_data.iloc[-1]['timestamp'],
                                 'entry_price': position['entry_price'],
                                 'exit_price': current_price,
                                 'side': position['side'],
-                                'pnl': close_result['pnl'],
+                                'pnl': net_pnl,  # Net P&L after commission
                                 'pnl_pct': close_result['pnl_pct'],
+                                'commission': commission_cost,
                                 'exit_reason': 'reverse'
                             })
                     
                     # Open new position
                     if pair not in risk_manager.positions:
                         size = validation['adjusted_size']
+                        # Apply commission when opening (deduct from capital)
+                        trade_value = size * current_price
+                        commission_cost = trade_value * self.commission
+                        # Adjust capital for commission
+                        risk_manager.current_capital -= commission_cost
                         risk_manager.open_position(pair, signal, size, current_price, confidence)
                         current_position = {
                             'entry_time': current_data.iloc[-1]['timestamp'],
                             'entry_price': current_price,
                             'side': signal
                         }
+                        logger.debug(f"Opened {signal} position: {pair} at {current_price:.2f}, size: {size:.6f}, commission: {commission_cost:.2f}")
             
             # Update equity curve
             current_equity = risk_manager.get_equity({pair: current_price})
@@ -196,15 +213,21 @@ class Backtester:
         # Close any remaining positions
         if pair in risk_manager.positions:
             final_price = data.iloc[-1]['close']
+            position = risk_manager.positions[pair]
             close_result = risk_manager.close_position(pair, final_price)
+            # Apply commission
+            trade_value = position['size'] * final_price
+            commission_cost = trade_value * self.commission
+            net_pnl = close_result['pnl'] - commission_cost
             trades.append({
                 'entry_time': data.iloc[-1]['timestamp'],
                 'exit_time': data.iloc[-1]['timestamp'],
-                'entry_price': risk_manager.positions.get(pair, {}).get('entry_price', final_price),
+                'entry_price': position.get('entry_price', final_price),
                 'exit_price': final_price,
-                'side': risk_manager.positions.get(pair, {}).get('side', 'long'),
-                'pnl': close_result['pnl'],
+                'side': position.get('side', 'long'),
+                'pnl': net_pnl,  # Net P&L after commission
                 'pnl_pct': close_result['pnl_pct'],
+                'commission': commission_cost,
                 'exit_reason': 'end_of_backtest'
             })
         
@@ -370,6 +393,9 @@ def load_models_and_backtest(client: GateIOClient, pair: str, interval: str = '1
     logger.info(f"Total Trades: {results['total_trades']}")
     logger.info(f"Win Rate: {results['win_rate']:.2%}")
     logger.info(f"Profit Factor: {results['profit_factor']:.2f}")
+    logger.info(f"Total Commission Paid: ${results.get('total_commission', 0):,.2f}")
+    logger.info(f"Net P&L (after commission): ${results['total_pnl']:,.2f}")
+    logger.info(f"Gross P&L (before commission): ${results.get('gross_pnl', 0):,.2f}")
     logger.info("="*50 + "\n")
     
     return results
@@ -486,6 +512,9 @@ def train_models_and_backtest(client: GateIOClient, pair: str, interval: str = '
     logger.info(f"Total Trades: {results['total_trades']}")
     logger.info(f"Win Rate: {results['win_rate']:.2%}")
     logger.info(f"Profit Factor: {results['profit_factor']:.2f}")
+    logger.info(f"Total Commission Paid: ${results.get('total_commission', 0):,.2f}")
+    logger.info(f"Net P&L (after commission): ${results['total_pnl']:,.2f}")
+    logger.info(f"Gross P&L (before commission): ${results.get('gross_pnl', 0):,.2f}")
     logger.info("="*50 + "\n")
     
     return results
