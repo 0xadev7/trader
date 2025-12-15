@@ -333,8 +333,8 @@ def train_models_and_backtest(client: GateIOClient, pair: str, interval: str = '
 
 
 if __name__ == '__main__':
-    from config import Config
-    from gateio_client import GateIOClient
+    from .config import Config
+    from .gateio_client import GateIOClient
     
     Config.ensure_directories()
     
