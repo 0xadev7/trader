@@ -216,8 +216,115 @@ class Backtester:
         }
 
 
+def load_models_and_backtest(client: GateIOClient, pair: str, interval: str = '15m'):
+    """Load pre-trained models and run backtest."""
+    import os
+    from .data_pipeline import DataPipeline
+    
+    logger.info(f"Loading models and backtesting for {pair}")
+    
+    # Initialize components
+    data_pipeline = DataPipeline(client)
+    risk_manager = RiskManager(
+        initial_capital=Config.BACKTEST_INITIAL_BALANCE,
+        risk_per_trade=Config.RISK_PER_TRADE
+    )
+    
+    # Fetch and prepare data
+    logger.info("Fetching historical data...")
+    df = data_pipeline.fetch_historical_data(pair, interval, limit=2000)
+    
+    if df.empty:
+        logger.error(f"No data fetched for {pair}")
+        return None
+    
+    df = data_pipeline.prepare_features(df)
+    df = df.dropna().reset_index(drop=True)
+    
+    if len(df) < Config.LOOKBACK_WINDOW + 100:
+        logger.error(f"Insufficient data for {pair}")
+        return None
+    
+    # Get feature columns
+    feature_cols = data_pipeline.get_feature_columns()
+    feature_cols = [col for col in feature_cols if col in df.columns]
+    feature_size = len(feature_cols)
+    
+    logger.info(f"Using {feature_size} features for {len(df)} candles")
+    
+    # Load pre-trained models
+    lstm_path = os.path.join(Config.MODEL_PATH, f"{pair}_lstm.pt")
+    transformer_path = os.path.join(Config.MODEL_PATH, f"{pair}_transformer.pt")
+    
+    lstm_model = None
+    transformer_model = None
+    
+    # Load LSTM model
+    if os.path.exists(lstm_path):
+        logger.info(f"Loading LSTM model from {lstm_path}")
+        lstm_model = LSTMModel(
+            input_size=feature_size,
+            hidden_size=Config.LSTM_UNITS
+        )
+        lstm_model.load(lstm_path)
+    else:
+        logger.warning(f"LSTM model not found at {lstm_path}, skipping LSTM predictions")
+    
+    # Load Transformer model
+    if os.path.exists(transformer_path):
+        logger.info(f"Loading Transformer model from {transformer_path}")
+        transformer_model = TransformerModel(
+            input_size=feature_size,
+            d_model=Config.TRANSFORMER_D_MODEL,
+            nhead=Config.TRANSFORMER_NHEAD,
+            num_layers=Config.TRANSFORMER_NLAYERS
+        )
+        transformer_model.load(transformer_path)
+    else:
+        logger.warning(f"Transformer model not found at {transformer_path}, skipping Transformer predictions")
+    
+    if lstm_model is None and transformer_model is None:
+        logger.error(f"No trained models found for {pair}. Please train models first using 'make train'")
+        return None
+    
+    # Create ensemble strategy
+    strategy = EnsembleStrategy(
+        feature_size=feature_size,
+        sequence_length=Config.LOOKBACK_WINDOW,
+        lstm_model=lstm_model,
+        transformer_model=transformer_model,
+        rl_agent=None
+    )
+    
+    # Run backtest
+    logger.info("Running backtest...")
+    backtester = Backtester(
+        initial_capital=Config.BACKTEST_INITIAL_BALANCE,
+        commission=Config.BACKTEST_COMMISSION
+    )
+    
+    results = backtester.run_backtest(df, strategy, risk_manager, pair)
+    
+    # Print results
+    logger.info("\n" + "="*50)
+    logger.info("BACKTEST RESULTS")
+    logger.info("="*50)
+    logger.info(f"Initial Capital: ${results['initial_capital']:,.2f}")
+    logger.info(f"Final Capital: ${results['final_capital']:,.2f}")
+    logger.info(f"Total Return: {results['total_return']:.2%}")
+    logger.info(f"Annualized Return: {results['annualized_return']:.2%}")
+    logger.info(f"Sharpe Ratio: {results['sharpe_ratio']:.2f}")
+    logger.info(f"Max Drawdown: {results['max_drawdown']:.2%}")
+    logger.info(f"Total Trades: {results['total_trades']}")
+    logger.info(f"Win Rate: {results['win_rate']:.2%}")
+    logger.info(f"Profit Factor: {results['profit_factor']:.2f}")
+    logger.info("="*50 + "\n")
+    
+    return results
+
+
 def train_models_and_backtest(client: GateIOClient, pair: str, interval: str = '15m'):
-    """Train models and run backtest."""
+    """Train models and run backtest (legacy function, kept for compatibility)."""
     from .data_pipeline import DataPipeline
     
     logger.info(f"Training models and backtesting for {pair}")
@@ -341,10 +448,10 @@ if __name__ == '__main__':
     # Initialize client (for backtesting, can use empty credentials)
     client = GateIOClient(Config.GATE_API_KEY, Config.GATE_API_SECRET)
     
-    # Run backtest for each pair
+    # Run backtest for each pair (using pre-trained models)
     for pair in Config.TRADING_PAIRS:
         try:
-            results = train_models_and_backtest(client, pair)
+            results = load_models_and_backtest(client, pair)
             if results:
                 logger.info(f"Backtest completed for {pair}")
         except Exception as e:
