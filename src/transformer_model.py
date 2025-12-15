@@ -180,8 +180,9 @@ class TransformerModel:
             val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
         # Learning rate scheduler
+        # Note: verbose parameter not available in all PyTorch versions
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode="min", factor=0.5, patience=5, verbose=True
+            self.optimizer, mode="min", factor=0.5, patience=5
         )
 
         history = {"train_loss": [], "val_loss": []}
