@@ -190,8 +190,11 @@ class RiskManager:
             pnl_pct = (entry_price - exit_price) / entry_price
 
         # Update capital
-        trade_value = size * exit_price
-        self.current_capital += trade_value + pnl
+        # When we opened the position, we deducted: size * entry_price
+        # When closing, we receive: size * exit_price
+        # The P&L is already included in the difference, so we just add back the exit value
+        exit_value = size * exit_price
+        self.current_capital += exit_value
 
         # Remove position
         del self.positions[pair]
@@ -234,7 +237,11 @@ class RiskManager:
         return self.positions.copy()
 
     def get_equity(self, current_prices: Dict[str, float]) -> float:
-        """Calculate total equity including unrealized P&L."""
+        """Calculate total equity including unrealized P&L.
+        
+        current_capital is the cash remaining after opening positions.
+        For each position, we need to add the current market value.
+        """
         equity = self.current_capital
 
         for pair, position in self.positions.items():
@@ -245,10 +252,24 @@ class RiskManager:
                 side = position["side"]
 
                 if side == "long":
-                    unrealized_pnl = (current_price - entry_price) * size
+                    # Long position: we own the asset
+                    # We deducted size * entry_price when opening (spent cash to buy)
+                    # Current value is size * current_price
+                    # Equity = cash + current_position_value
+                    equity += size * current_price
                 else:  # short
-                    unrealized_pnl = (entry_price - current_price) * size
-
-                equity += size * entry_price + unrealized_pnl
+                    # Short position: we sold the asset
+                    # When opening, we deducted size * entry_price (treated as margin/collateral)
+                    # To close short, we'd buy back at current_price
+                    # Profit = (entry_price - current_price) * size (profit if price went down)
+                    # Since we deducted entry_value as margin, we need to:
+                    # - Add back the margin: size * entry_price
+                    # - Add the profit: (entry_price - current_price) * size
+                    # Total: size * entry_price + (entry_price - current_price) * size
+                    # = size * (2 * entry_price - current_price)
+                    # Or simpler: we get back margin + profit = entry_value + (entry_price - current_price) * size
+                    entry_value = size * entry_price
+                    profit = (entry_price - current_price) * size
+                    equity += entry_value + profit
 
         return equity

@@ -21,6 +21,58 @@ class Backtester:
         self.commission = commission
         self.results = {}
     
+    def _calculate_metrics(self, equity_curve: List[float], 
+                          trades: List[Dict]) -> Dict:
+        """Calculate performance metrics."""
+        equity_array = np.array(equity_curve)
+        returns = np.diff(equity_array) / equity_array[:-1]
+        
+        # Total return
+        total_return = (equity_array[-1] - equity_array[0]) / equity_array[0]
+        
+        # Annualized return (assuming daily data)
+        days = len(equity_array) / 1440  # Approximate days if 1min candles
+        annualized_return = (1 + total_return) ** (365 / days) - 1 if days > 0 else 0
+        
+        # Sharpe ratio
+        if len(returns) > 1 and np.std(returns) > 0:
+            sharpe_ratio = np.sqrt(252) * np.mean(returns) / np.std(returns)
+        else:
+            sharpe_ratio = 0.0
+        
+        # Maximum drawdown
+        peak = np.maximum.accumulate(equity_array)
+        drawdown = (equity_array - peak) / peak
+        max_drawdown = np.min(drawdown)
+        
+        # Win rate
+        if trades:
+            winning_trades = [t for t in trades if t['pnl'] > 0]
+            win_rate = len(winning_trades) / len(trades)
+            
+            # Average win/loss
+            avg_win = np.mean([t['pnl'] for t in winning_trades]) if winning_trades else 0
+            losing_trades = [t for t in trades if t['pnl'] <= 0]
+            avg_loss = np.mean([abs(t['pnl']) for t in losing_trades]) if losing_trades else 0
+            profit_factor = (avg_win * len(winning_trades)) / (avg_loss * len(losing_trades)) \
+                          if avg_loss > 0 and losing_trades else float('inf')
+        else:
+            win_rate = 0.0
+            profit_factor = 0.0
+        
+        return {
+            'initial_capital': equity_array[0],  # Use actual starting equity from curve
+            'final_capital': equity_array[-1],
+            'total_return': total_return,
+            'annualized_return': annualized_return,
+            'sharpe_ratio': sharpe_ratio,
+            'max_drawdown': max_drawdown,
+            'total_trades': len(trades),
+            'win_rate': win_rate,
+            'profit_factor': profit_factor,
+            'total_pnl': sum([t['pnl'] for t in trades])
+        }
+    
     def run_backtest(self, data: pd.DataFrame, strategy: EnsembleStrategy,
                     risk_manager: RiskManager, pair: str) -> Dict:
         """Run backtest on historical data.
@@ -203,7 +255,7 @@ class Backtester:
             profit_factor = 0.0
         
         return {
-            'initial_capital': self.initial_capital,
+            'initial_capital': equity_array[0],  # Use actual starting equity from curve
             'final_capital': equity_array[-1],
             'total_return': total_return,
             'annualized_return': annualized_return,
