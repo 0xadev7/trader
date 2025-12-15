@@ -334,7 +334,8 @@ class PPOAgent:
 
     def load(self, path: str):
         """Load agent."""
-        checkpoint = torch.load(path, map_location=self.device)
+        # weights_only=False is needed for PyTorch 2.6+ compatibility
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         self.policy.load_state_dict(checkpoint["policy_state_dict"])
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         logger.info(f"PPO agent loaded from {path}")
