@@ -218,7 +218,7 @@ class Backtester:
 
 def train_models_and_backtest(client: GateIOClient, pair: str, interval: str = '15m'):
     """Train models and run backtest."""
-    from data_pipeline import DataPipeline
+    from .data_pipeline import DataPipeline
     
     logger.info(f"Training models and backtesting for {pair}")
     
