@@ -245,16 +245,24 @@ class TradingPair:
         
         if from_time and to_time:
             # Fetch by date range - work backwards from end_date
-            # Gate.io API returns data in reverse chronological order (newest first)
+            # Gate.io API has a limit on the time range per request (max 1000 candles worth)
+            # So we need to fetch in smaller time windows
             current_to = to_time
             estimated_candles = (to_time - from_time) // interval_seconds
             logger.info(f"Fetching data from {start_date} to {end_date} (estimated {estimated_candles} candles)")
             
+            # Calculate max time range for 1000 candles (use 900 to be safe)
+            max_candles_per_request = 900
+            max_time_range = max_candles_per_request * interval_seconds
+            
             while current_to > from_time:
                 try:
+                    # Calculate the from_time for this request (max 900 candles back)
+                    request_from = max(from_time, current_to - max_time_range)
+                    
                     klines = self.client.get_klines(
-                        self.symbol, interval, max_per_request, 
-                        from_time=from_time, to_time=current_to
+                        self.symbol, interval, max_candles_per_request, 
+                        from_time=request_from, to_time=current_to
                     )
                     
                     if not klines:
@@ -273,11 +281,11 @@ class TradingPair:
                         all_klines = [k for k in all_klines if int(k[0]) >= from_time]
                         break
                     
-                    # Move the window backwards
+                    # Move the window backwards (use oldest timestamp - 1 to avoid overlap)
                     current_to = oldest_timestamp - 1
                     
                     # Rate limiting
-                    time_module.sleep(0.1)
+                    time_module.sleep(0.15)
                     
                     # Progress logging
                     if len(all_klines) % 5000 == 0:
@@ -286,6 +294,16 @@ class TradingPair:
                         
                 except Exception as e:
                     logger.error(f"Error fetching klines batch: {e}")
+                    # Try with smaller range if range too broad error
+                    if "range too broad" in str(e).lower() or "INVALID_PARAM_VALUE" in str(e):
+                        logger.warning("Range too broad, trying with smaller time window...")
+                        # Reduce max candles and try again
+                        max_candles_per_request = min(max_candles_per_request - 100, 500)
+                        max_time_range = max_candles_per_request * interval_seconds
+                        if max_candles_per_request < 100:
+                            logger.error("Cannot fetch data - range is too broad even with minimum window")
+                            break
+                        continue
                     import traceback
                     traceback.print_exc()
                     break
