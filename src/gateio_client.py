@@ -248,9 +248,44 @@ class TradingPair:
         if not all_klines:
             return pd.DataFrame()
 
-        df = pd.DataFrame(
-            all_klines, columns=["timestamp", "volume", "close", "high", "low", "open"]
-        )
+        # Gate.io API v4 candlesticks response format:
+        # [t, v, c, h, l, o, sum, ...]
+        # t: timestamp (Unix seconds)
+        # v: volume (quote currency, e.g., USDT)
+        # c: close price
+        # h: high price
+        # l: low price
+        # o: open price
+        # sum: volume (base currency, e.g., BTC)
+        # Additional fields may be present
+        
+        # Check the actual number of columns in the response
+        num_cols = len(all_klines[0]) if all_klines else 0
+        
+        if num_cols == 0:
+            logger.warning("No klines data received")
+            return pd.DataFrame()
+        
+        # Gate.io API v4 candlesticks format: [t, v, c, h, l, o, sum, ...]
+        # Where: t=timestamp, v=quote_volume, c=close, h=high, l=low, o=open, sum=base_volume
+        # We need at least 6 columns, but API may return 8 or more
+        if num_cols < 6:
+            logger.error(f"Unexpected klines format: {num_cols} columns, expected at least 6")
+            logger.debug(f"First kline sample: {all_klines[0] if all_klines else 'None'}")
+            return pd.DataFrame()
+        
+        # Create DataFrame - let pandas handle the column count automatically
+        # Then select and rename only the columns we need
+        df = pd.DataFrame(all_klines)
+        
+        # Gate.io API returns columns in order: [timestamp, quote_volume, close, high, low, open, base_volume, ...]
+        # Map to our standard format: [timestamp, open, high, low, close, volume]
+        if num_cols >= 6:
+            df = df.iloc[:, [0, 5, 3, 4, 2, 1]].copy()  # Select columns: [timestamp, open, high, low, close, volume]
+            df.columns = ["timestamp", "open", "high", "low", "close", "volume"]
+        else:
+            logger.error(f"Insufficient columns in klines response: {num_cols}")
+            return pd.DataFrame()
 
         # Convert types
         df["timestamp"] = pd.to_datetime(df["timestamp"].astype(int), unit="s")
