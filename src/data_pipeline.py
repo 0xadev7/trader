@@ -17,16 +17,31 @@ class DataPipeline:
         self.client = client
 
     def fetch_historical_data(
-        self, pair: str, interval: str, limit: int = 500
+        self, pair: str, interval: str, limit: int = None, start_date: str = None, end_date: str = None
     ) -> pd.DataFrame:
-        """Fetch historical candlestick data."""
+        """Fetch historical candlestick data.
+        
+        Args:
+            pair: Trading pair (e.g., 'BTC_USDT')
+            interval: Time interval (1m, 5m, 15m, 1h, 4h, 1d)
+            limit: Number of candles (optional, ignored if date range provided)
+            start_date: Start date in 'YYYY-MM-DD' format (optional)
+            end_date: End date in 'YYYY-MM-DD' format (optional)
+        
+        Returns:
+            DataFrame with OHLCV data
+        """
         try:
             pair_obj = TradingPair(pair, self.client)
-            df = pair_obj.get_klines_df(interval, limit)
-            logger.info(f"Fetched {len(df)} candles for {pair} ({interval})")
+            df = pair_obj.get_klines_df(interval, limit=limit, start_date=start_date, end_date=end_date)
+            if not df.empty:
+                date_range = f" from {df['timestamp'].min()} to {df['timestamp'].max()}" if start_date or end_date else ""
+                logger.info(f"Fetched {len(df)} candles for {pair} ({interval}){date_range}")
             return df
         except Exception as e:
             logger.error(f"Error fetching data for {pair}: {e}")
+            import traceback
+            traceback.print_exc()
             return pd.DataFrame()
 
     def calculate_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:

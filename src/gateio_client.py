@@ -107,7 +107,7 @@ class GateIOClient:
         )
 
     def get_klines(
-        self, pair: str, interval: str = "15m", limit: int = 100, from_time: int = None
+        self, pair: str, interval: str = "15m", limit: int = 100, from_time: int = None, to_time: int = None
     ) -> List:
         """Get candlestick data (klines).
 
@@ -115,7 +115,8 @@ class GateIOClient:
             pair: Trading pair (e.g., 'BTC_USDT')
             interval: Time interval (1m, 5m, 15m, 1h, 4h, 1d)
             limit: Number of candles (max 1000 per request)
-            from_time: Start timestamp (optional)
+            from_time: Start timestamp in seconds (optional)
+            to_time: End timestamp in seconds (optional)
         """
         # Gate.io API v4 uses BTC_USDT format (underscore) for currency_pair
         # Limit maximum is typically 1000 per request
@@ -123,6 +124,8 @@ class GateIOClient:
         params = {"currency_pair": pair, "interval": interval, "limit": max_limit}
         if from_time:
             params["from"] = from_time
+        if to_time:
+            params["to"] = to_time
 
         return self._request("GET", "spot/candlesticks", params)
 
@@ -199,51 +202,127 @@ class TradingPair:
         ticker = self.client.get_ticker(self.symbol)
         return float(ticker.get("last", 0))
 
-    def get_klines_df(self, interval: str, limit: int = 500) -> "pd.DataFrame":
+    def get_klines_df(self, interval: str, limit: int = None, start_date: str = None, end_date: str = None) -> "pd.DataFrame":
         """Get candlestick data as DataFrame.
         
-        Supports pagination for limits > 1000 by making multiple requests.
+        Args:
+            interval: Time interval (1m, 5m, 15m, 1h, 4h, 1d)
+            limit: Number of candles (optional, ignored if date range provided)
+            start_date: Start date in 'YYYY-MM-DD' format (optional)
+            end_date: End date in 'YYYY-MM-DD' format (optional)
+        
+        If date range is provided, fetches all candles in that range.
+        Otherwise uses limit to fetch recent candles.
         """
         import pandas as pd
         import time as time_module
+        from datetime import datetime
         
         all_klines = []
-        remaining_limit = limit
+        
+        # Convert date strings to timestamps if provided
         from_time = None
+        to_time = None
+        if start_date:
+            from_time = int(datetime.strptime(start_date, '%Y-%m-%d').timestamp())
+        if end_date:
+            # Set to end of day
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+            to_time = int(end_dt.replace(hour=23, minute=59, second=59).timestamp())
         
         # Gate.io API max limit per request is 1000
         max_per_request = 1000
         
-        while remaining_limit > 0:
-            request_limit = min(remaining_limit, max_per_request)
-            try:
-                klines = self.client.get_klines(
-                    self.symbol, interval, request_limit, from_time=from_time
-                )
-                
-                if not klines:
-                    break
+        # Calculate interval duration in seconds for date range fetching
+        interval_seconds = {
+            '1m': 60,
+            '5m': 300,
+            '15m': 900,
+            '1h': 3600,
+            '4h': 14400,
+            '1d': 86400
+        }.get(interval, 900)
+        
+        if from_time and to_time:
+            # Fetch by date range - work backwards from end_date
+            # Gate.io API returns data in reverse chronological order (newest first)
+            current_to = to_time
+            estimated_candles = (to_time - from_time) // interval_seconds
+            logger.info(f"Fetching data from {start_date} to {end_date} (estimated {estimated_candles} candles)")
+            
+            while current_to > from_time:
+                try:
+                    klines = self.client.get_klines(
+                        self.symbol, interval, max_per_request, 
+                        from_time=from_time, to_time=current_to
+                    )
                     
-                all_klines.extend(klines)
-                
-                # If we got fewer than requested, we've reached the end
-                if len(klines) < request_limit:
-                    break
-                
-                # Update from_time to get older data (klines are in reverse chronological order)
-                # The first timestamp in the response is the most recent
-                if len(klines) > 0:
-                    from_time = int(klines[-1][0]) - 1  # Use last candle's timestamp - 1
-                
-                remaining_limit -= len(klines)
-                
-                # Rate limiting - small delay between requests
-                if remaining_limit > 0:
+                    if not klines:
+                        break
+                    
+                    # Gate.io returns data in reverse chronological order (newest first)
+                    # Prepend to maintain chronological order when we reverse later
+                    all_klines = klines + all_klines
+                    
+                    # Get the oldest timestamp from this batch (last item in response)
+                    oldest_timestamp = int(klines[-1][0])
+                    
+                    # If we've reached or passed the start time, we're done
+                    if oldest_timestamp <= from_time:
+                        # Filter out any candles before start_time
+                        all_klines = [k for k in all_klines if int(k[0]) >= from_time]
+                        break
+                    
+                    # Move the window backwards
+                    current_to = oldest_timestamp - 1
+                    
+                    # Rate limiting
                     time_module.sleep(0.1)
                     
-            except Exception as e:
-                logger.error(f"Error fetching klines batch: {e}")
-                break
+                    # Progress logging
+                    if len(all_klines) % 5000 == 0:
+                        oldest_dt = pd.to_datetime(oldest_timestamp, unit='s')
+                        logger.info(f"Fetched {len(all_klines)} candles so far... (oldest: {oldest_dt})")
+                        
+                except Exception as e:
+                    logger.error(f"Error fetching klines batch: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    break
+        else:
+            # Fetch by limit (backward compatibility)
+            remaining_limit = limit or 500
+            from_time_param = None
+            
+            while remaining_limit > 0:
+                request_limit = min(remaining_limit, max_per_request)
+                try:
+                    klines = self.client.get_klines(
+                        self.symbol, interval, request_limit, from_time=from_time_param
+                    )
+                    
+                    if not klines:
+                        break
+                        
+                    all_klines.extend(klines)
+                    
+                    # If we got fewer than requested, we've reached the end
+                    if len(klines) < request_limit:
+                        break
+                    
+                    # Update from_time to get older data (klines are in reverse chronological order)
+                    if len(klines) > 0:
+                        from_time_param = int(klines[-1][0]) - 1
+                    
+                    remaining_limit -= len(klines)
+                    
+                    # Rate limiting
+                    if remaining_limit > 0:
+                        time_module.sleep(0.1)
+                        
+                except Exception as e:
+                    logger.error(f"Error fetching klines batch: {e}")
+                    break
         
         if not all_klines:
             return pd.DataFrame()
@@ -292,9 +371,23 @@ class TradingPair:
         for col in ["open", "high", "low", "close", "volume"]:
             df[col] = df[col].astype(float)
 
-        # Sort by timestamp (oldest first) and limit to requested amount
+        # Sort by timestamp (oldest first)
         df = df.sort_values("timestamp").reset_index(drop=True)
-        if len(df) > limit:
-            df = df.tail(limit).reset_index(drop=True)
+        
+        # Remove duplicates (in case of overlap)
+        df = df.drop_duplicates(subset=['timestamp']).reset_index(drop=True)
+        
+        # Filter by date range if provided
+        if start_date:
+            start_dt = pd.to_datetime(start_date)
+            df = df[df['timestamp'] >= start_dt]
+        if end_date:
+            end_dt = pd.to_datetime(end_date) + pd.Timedelta(days=1)  # Include entire end date
+            df = df[df['timestamp'] < end_dt]
+        
+        # Limit to requested amount if limit was specified and no date range
+        if limit and not (start_date or end_date):
+            if len(df) > limit:
+                df = df.tail(limit).reset_index(drop=True)
         
         return df

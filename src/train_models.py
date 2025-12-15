@@ -10,16 +10,31 @@ from .gateio_client import GateIOClient
 from .data_pipeline import DataPipeline
 
 
-def train_models_for_pair(client: GateIOClient, pair: str, interval: str = "15m"):
-    """Train LSTM and Transformer models for a trading pair."""
+def train_models_for_pair(client: GateIOClient, pair: str, interval: str = "15m", 
+                          start_date: str = None, end_date: str = None):
+    """Train LSTM and Transformer models for a trading pair.
+    
+    Args:
+        client: GateIOClient instance
+        pair: Trading pair (e.g., 'BTC_USDT')
+        interval: Time interval (default: '15m')
+        start_date: Start date in 'YYYY-MM-DD' format (optional, uses Config if not provided)
+        end_date: End date in 'YYYY-MM-DD' format (optional, uses Config if not provided)
+    """
     logger.info(f"Training models for {pair}")
 
     # Initialize data pipeline
     data_pipeline = DataPipeline(client)
 
+    # Use config dates if not provided
+    if start_date is None:
+        start_date = Config.TRAIN_START_DATE
+    if end_date is None:
+        end_date = Config.TRAIN_END_DATE
+
     # Fetch historical data
-    logger.info(f"Fetching historical data for {pair}...")
-    df = data_pipeline.fetch_historical_data(pair, interval, limit=3000)
+    logger.info(f"Fetching historical data for {pair} from {start_date} to {end_date}...")
+    df = data_pipeline.fetch_historical_data(pair, interval, start_date=start_date, end_date=end_date)
 
     if df.empty:
         logger.error(f"No data fetched for {pair}")
@@ -131,9 +146,15 @@ if __name__ == "__main__":
     client = GateIOClient(Config.GATE_API_KEY, Config.GATE_API_SECRET)
 
     # Train models for each trading pair
+    logger.info(f"Training data range: {Config.TRAIN_START_DATE} to {Config.TRAIN_END_DATE}")
     for pair in Config.TRADING_PAIRS:
         try:
-            success = train_models_for_pair(client, pair)
+            success = train_models_for_pair(
+                client, pair, 
+                interval=Config.PRIMARY_TIMEFRAME,
+                start_date=Config.TRAIN_START_DATE,
+                end_date=Config.TRAIN_END_DATE
+            )
             if success:
                 logger.info(f"✅ Completed training for {pair}\n")
             else:

@@ -415,8 +415,12 @@ def train_models_and_backtest(client: GateIOClient, pair: str, interval: str = '
     )
     
     # Fetch and prepare data
-    logger.info("Fetching historical data...")
-    df = data_pipeline.fetch_historical_data(pair, interval, limit=2000)
+    logger.info(f"Fetching historical data from {Config.BACKTEST_START_DATE} to {Config.BACKTEST_END_DATE}...")
+    df = data_pipeline.fetch_historical_data(
+        pair, interval, 
+        start_date=Config.BACKTEST_START_DATE, 
+        end_date=Config.BACKTEST_END_DATE
+    )
     
     if df.empty:
         logger.error(f"No data fetched for {pair}")

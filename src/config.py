@@ -46,9 +46,13 @@ class Config:
     TAKE_PROFIT_PCT = float(os.getenv('TAKE_PROFIT_PCT', '0.04'))  # 4% take profit
     MAX_DRAWDOWN_PCT = float(os.getenv('MAX_DRAWDOWN_PCT', '0.15'))  # 15% max drawdown
     
+    # Training data date range
+    TRAIN_START_DATE = os.getenv('TRAIN_START_DATE', '2023-01-01')
+    TRAIN_END_DATE = os.getenv('TRAIN_END_DATE', '2024-01-01')
+    
     # Backtesting
-    BACKTEST_START_DATE = os.getenv('BACKTEST_START_DATE', '2023-01-01')
-    BACKTEST_END_DATE = os.getenv('BACKTEST_END_DATE', '2024-01-01')
+    BACKTEST_START_DATE = os.getenv('BACKTEST_START_DATE', '2024-01-01')
+    BACKTEST_END_DATE = os.getenv('BACKTEST_END_DATE', '2024-12-31')
     BACKTEST_INITIAL_BALANCE = float(os.getenv('BACKTEST_INITIAL_BALANCE', '10000'))
     BACKTEST_COMMISSION = float(os.getenv('BACKTEST_COMMISSION', '0.001'))  # 0.1% commission
     
